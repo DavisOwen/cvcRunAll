@@ -5,76 +5,84 @@
 #SBATCH -t 8:00:00
 #SBATCH -A A-ti3
 
-### Results File ###
+### Paths of programs ###
 
-RES=${PDB}_results.csv
+PWD=$(pwd)  #Directory with all auxiliary programs and run_all
+STR=${PWD}/structures  #Directory with unrefined directory and structure factor directory
+RES=${STR}/${PDB}_results.csv #Result file for PDB
+UNR=${STR}/unrefined #Directory with all original, unrefined PDB files
+FAC=${STR}/factors #Directory with all unrefined PDB file's structure factor cif files from the PDB
+MP=/work/01872/nclement/software/MolProbity/cmdline/oneline-analysis #MolProbity program
+MOD=/work/04202/sdo395/ModRefiner-l #ModRefiner directory with full atom and main chain programs
+3D=/work/04202/sdo395/i3Drefine/bin/i3Drefine.sh #3DRefine program
+CVC=${PWD}/cvc-scripts #cvc-scripts folder with Nathan's scripts for computing energies
+RESDIR=${STR}/${PDB} #Directory to store results
 
 ############Unrefined#################
 
 ### Copy File ###
 
-mkdir ./structures/${PDB}
-cp ./structures/unrefined/${PDB}.pdb ./structures/${PDB}
+mkdir $RESDIR
+cp ${UNR}/${PDB}.pdb $RESDIR
 
 ### MolProbity ###
 
 module load gcc
 export PYTHONPATH=$PYTHONPATH:/home1/01872/nclement/.local/lib
 export PATH=$PATH:/work/01872/nclement/install/bin
-/work/01872/nclement/software/MolProbity/cmdline/oneline-analysis ./structures/${PDB} >> ./structures/${PDB}/MPUnrefined.txt
+${MP} ${RESDIR} >> ${RESDIR}/MPUnrefined.txt
 if [ $? = 0 ]; then
-readMP.py ./structures/${PDB}/MPUnrefined.txt
-csvify_MP.py ./structures/${PDB}/MPUnrefined.txt ${PDB}.pdb
-mv ${PDB}MP.csv ./structures/${PDB}
+${PWD}/readMP.py ${RESDIR}/MPUnrefined.txt
+${PWD}/csvify_MP.py ${RESDIR}/MPUnrefined.txt ${PDB}.pdb
+mv ${PDB}MP.csv ${RESDIR}
 echo -n Unrefined, | cat >> $RES
-cat ./structures/${PDB}/${PDB}MP.csv >> $RES
+cat ${RESDIR}/${PDB}MP.csv >> $RES
 else
-	echo -n Unrefined,{$PDB},x,x,x,x, | cat >> $RES
+	echo -n Unrefined,${PDB},x,x,x,x, | cat >> $RES
 fi
 
 ### Compute Energy ###
 
 module reset
-cd ./structures/${PDB}/
-../../cvc-scripts/computeAllEnergy.sh ${PDB}.pdb 256
+cd ${RESDIR}
+${CVC}/computeAllEnergy.sh ${PDB}.pdb 256
 if [ $? = 0 ]; then
-../../cvc-scripts/getGB_single_parts_clean.sh ${PDB}.pdb >> gb${PDB}.txt
-../../csvify_energy.py gb${PDB}.txt
-cat gb${PDB}.csv >> ../../$RES
+${CVC}/getGB_single_parts_clean.sh ${PDB}.pdb >> gb${PDB}.txt
+${PWD}/csvify_energy.py gb${PDB}.txt
+cat gb${PDB}.csv >> $RES
 else
-	echo -n x,x,x,x,x,x, | cat >> ../../$RES
+	echo -n x,x,x,x,x,x, | cat >> $RES
 fi
 rm -r PQR OUT INP QUAD RAW RAWN
 
 ### Compute Amber Energy ###
 
 module reset
-../../cvc-scripts/amber/runAmber_single.sh ${PDB}.pdb 50
+${CVC}/amber/runAmber_single.sh ${PDB}.pdb 50
 if [ $? = 0 ]; then
-../../getAmberEnergies.py ${PDB}.pdb
-cat amber.csv >> ../../$RES
+${PWD}/getAmberEnergies.py ${PDB}.pdb
+cat amber.csv >> $RES
 else
-	echo -n x,x,x,x,x,x,x,x,x,x, | cat >> ../../$RES
+	echo -n x,x,x,x,x,x,x,x,x,x, | cat >> $RES
 fi
 rm -r AMBER INP ERR leap.log mdinfo
-cd ../../
+cd ${PWD}
 
 ### Calculate RSR, RSCC, Rwork, Rfree, DPI ###
 
-cp ./structures/factors/${PDB}.cif ./
-cp ./structures/${PDB}/${PDB}.pdb ./
+cp ${FAC}/${PDB}.cif ${PWD}
+cp ${RESDIR}/${PDB}.pdb ${PWD}
 PDB=${PDB} rsrCalc.sh
-mv ${PDB}.list ${PDB}_refmac1.pdb ./structures/${PDB}
-csvify_rsr.py ./structures/${PDB}/${PDB}.list
-csvify_rwork.py ./structures/${PDB}/${PDB}_refmac1.pdb
-mv rsr.csv rwork.csv ./structures/${PDB}
-cat ./structures/${PDB}/rsr.csv >> $RES
+${PWD}/csvify_rsr.py ${PDB}.list
+${PWD}/csvify_rwork.py ${PDB}_refmac1.pdb ${PDB}_refmac1.log
+mv ${PDB}.list ${PDB}_refmac1.pdb ${PDB}_refmac1.log rsr.csv rwork.csv $RESDIR
+cat ${RESDIR}/rsr.csv >> $RES
 if [ $? != 0 ];then 
 	echo -n x,x, | cat >> $RES
 fi
-cat ./structures/${PDB}/rwork.csv >> $RES
+cat ${RESDIR}/rwork.csv >> $RES
 if [ $? != 0 ];then 
-	echo -n x,x, | cat >> $RES
+	echo -n x,x,x,x, | cat >> $RES
 fi
 rm ${PDB}.pdb
 echo '' | cat >> $RES
@@ -84,21 +92,21 @@ echo '' | cat >> $RES
 ### Refine ###
 
 ml python/2.7.12
-/work/04202/sdo395/ModRefiner-l/emrefinement ./structures/${PDB} /work/04202/sdo395/ModRefiner-l/ ${PDB}.pdb ${PDB}.pdb 50 10
-mkdir ./structures/${PDB}/em${PDB}
-mv ./structures/${PDB}/em${PDB}.pdb ./structures/${PDB}/em${PDB}/${PDB}.pdb
-edit_mf_results.py ./structures/${PDB}/em${PDB}/${PDB}.pdb
+${MOD}/emrefinement ${RESDIR} ${MOD} ${PDB}.pdb ${PDB}.pdb 50 10
+mkdir ${RESDIR}/em
+mv ${RESDIR}/em${PDB}.pdb ${RESDIR}/em/${PDB}.pdb
+${PWD}/edit_mf_results.py ${RESDIR}/em/${PDB}.pdb
 
 ### MolProbity ###
 
 ml gcc
-/work/01872/nclement/software/MolProbity/cmdline/oneline-analysis ./structures/${PDB}/em${PDB} >> ./structures/${PDB}/em${PDB}/MP${PDB}.txt
+${MP} ${RESDIR}/em >> ${RESDIR}/em/MP${PDB}.txt
 if [ $? = 0 ];then
-readMP.py ./structures/${PDB}/em${PDB}/MP${PDB}.txt
-csvify_MP.py ./structures/${PDB}/em${PDB}/MP${PDB}.txt ${PDB}.pdb
-mv ${PDB}MP.csv ./structures/${PDB}/em${PDB}
+${PWD}/readMP.py ${RESDIR}/em/MP${PDB}.txt
+${PWD}/csvify_MP.py ${RESDIR}/em/MP${PDB}.txt ${PDB}.pdb
+mv ${PDB}MP.csv ${RESDIR}/em
 echo -n Full Atom ModRefiner, | cat >> $RES
-cat ./structures/${PDB}/em${PDB}/${PDB}MP.csv >> $RES
+cat ${RESDIR}/em/${PDB}MP.csv >> $RES
 else
 	echo -n Full Atom ModRefiner,${PDB},x,x,x,x | cat >> $RES
 fi
@@ -106,45 +114,44 @@ fi
 ### Compute Energy ###
 
 module reset
-cd ./structures/${PDB}/em${PDB}
-../../../cvc-scripts/computeAllEnergy.sh ${PDB}.pdb 256
+cd ${RESDIR}/em
+${CVC}/computeAllEnergy.sh ${PDB}.pdb 256
 if [ $? = 0 ]; then
-../../../cvc-scripts/getGB_single_parts_clean.sh ${PDB}.pdb >> gb${PDB}.txt
-../../../csvify_energy.py gb${PDB}.txt ${PDB}
-cat gb${PDB}.csv >> ../../../$RES
+${CVC}/getGB_single_parts_clean.sh ${PDB}.pdb >> gb${PDB}.txt
+${PWD}/csvify_energy.py gb${PDB}.txt
+cat gb${PDB}.csv >> $RES
 else
-	echo -n x,x,x,x,x,x, | cat >> ../../../$RES
+	echo -n x,x,x,x,x,x, | cat >> $RES
 fi
 rm -r PQR OUT INP QUAD RAW RAWN
 
 ### Compute Amber Energy ###
 
 module reset
-../../../cvc-scripts/amber/runAmber_single.sh ${PDB}.pdb 50
+${CVC}/amber/runAmber_single.sh ${PDB}.pdb 50
 if [ $? = 0 ]; then
-../../../getAmberEnergies.py ${PDB}.pdb
-cat amber.csv >> ../../../$RES
+${PWD}/getAmberEnergies.py ${PDB}.pdb
+cat amber.csv >> $RES
 else
-	echo -n x,x,x,x,x,x,x,x,x,x, | cat >> ../../../$RES
+	echo -n x,x,x,x,x,x,x,x,x,x, | cat >> $RES
 fi
 rm -r AMBER INP ERR leap.log mdinfo
-cd ../../../
+cd ${PWD}
 
 #### Calculate RSR, RSCC, Rwork, Rfree, DPI ###
 
-cp ./structures/${PDB}/em${PDB}/${PDB}.pdb ./
+cp ${RESDIR}/em/${PDB}.pdb ${PWD}
 PDB=${PDB} rsrCalc.sh
-mv ${PDB}.list ${PDB}_refmac1.pdb ./structures/${PDB}/em${PDB}
-csvify_rsr.py ./structures/${PDB}/em${PDB}/${PDB}.list
-csvify_rwork.py ./structures/${PDB}/em${PDB}/${PDB}_refmac1.pdb
-mv rsr.csv rwork.csv ./structures/${PDB}/em${PDB}
-cat ./structures/${PDB}/em${PDB}/rsr.csv >> $RES
+csvify_rsr.py ${PDB}.list
+csvify_rwork.py ${PDB}_refmac1.pdb ${PDB}_refmac1.log
+mv ${PDB}.list ${PDB}_refmac1.pdb ${PDB}_refmac1.log rsr.csv rwork.csv ${RESDIR}/em
+cat ${RESDIR}/em/rsr.csv >> $RES
 if [ $? != 0 ];then
 	echo -n x,x, | cat >> $RES
 fi
-cat ./structures/${PDB}/em${PDB}/rwork.csv >> $RES
+cat ${RESDIR}/em/rwork.csv >> $RES
 if [ $? != 0 ];then
-	echo -n x,x, | cat >> $RES
+	echo -n x,x,x,x, | cat >> $RES
 fi
 rm ${PDB}.pdb
 echo '' | cat >> $RES
@@ -154,27 +161,27 @@ echo '' | cat >> $RES
 ### Main Chain Refine ###
 
 ml python/2.7.12
-/work/04202/sdo395/ModRefiner-l/mcrefinement ./structures/${PDB} /work/04202/sdo395/ModRefiner-l/ ${PDB}.pdb ${PDB}.pdb 50
-mkdir ./structures/${PDB}/mc${PDB}
-mv ./structures/${PDB}/mc${PDB}.pdb ./structures/${PDB}/mc${PDB}/${PDB}.pdb
+${MOD}/mcrefinement ${RESDIR} ${MOD} ${PDB}.pdb ${PDB}.pdb 50
+mkdir ${RESDIR}/mc
+mv ${RESDIR}/mc${PDB}.pdb ${RESDIR}/mc/${PDB}.pdb
 
 ### Full Atom Refine ###
 
-/work/04202/sdo395/ModRefiner-l/emrefinement ./structures/${PDB}/mc${PDB} /work/04202/sdo395/ModRefiner-l/ ${PDB}.pdb ${PDB}.pdb 50 10
-mkdir ./structures/${PDB}/emmc${PDB}
-mv ./structures/${PDB}/mc${PDB}/em${PDB}.pdb ./structures/${PDB}/emmc${PDB}/${PDB}.pdb
-edit_mf_results.py ./structures/${PDB}/emmc${PDB}/${PDB}.pdb
+${MOD}/emrefinement ${MOD}/mc ${MOD} ${PDB}.pdb ${PDB}.pdb 50 10
+mkdir ${RESDIR}/emmc
+mv ${RESDIR}/mc/em${PDB}.pdb ${RESDIR}/emmc/${PDB}.pdb
+edit_mf_results.py ${RESDIR}/emmc/${PDB}.pdb
 
 ### MolProbity ###
 
 ml gcc
-/work/01872/nclement/software/MolProbity/cmdline/oneline-analysis ./structures/${PDB}/emmc${PDB} >> ./structures/${PDB}/emmc${PDB}/MP${PDB}.txt
+${MP} ${RESDIR}/emmc >> ${RESDIR}/emmc/MP${PDB}.txt
 if [ $? = 0 ];then
-readMP.py ./structures/${PDB}/emmc${PDB}/MP${PDB}.txt
-csvify_MP.py ./structures/${PDB}/emmc${PDB}/MP${PDB}.txt ${PDB}.pdb
-mv ${PDB}MP.csv ./structures/${PDB}/emmc${PDB}
+${PWD}/readMP.py ${RESDIR}/emmc/MP${PDB}.txt
+${PWD}/csvify_MP.py ${RESDIR}/emmc/MP${PDB}.txt ${PDB}.pdb
+mv ${PDB}MP.csv ${RESDIR}/emmc
 echo -n Main Chain then Full Atom ModRefiner, | cat >> $RES
-cat ./structures/${PDB}/emmc${PDB}/${PDB}MP.csv >> $RES
+cat ${RESDIR}/emmc/${PDB}MP.csv >> $RES
 else
 	echo -n Main Chain then Full Atom ModRefiner,${PDB},x,x,x,x, | cat >> $RES
 fi
@@ -182,45 +189,44 @@ fi
 ### Compute Energy ###
 
 module reset
-cd ./structures/${PDB}/emmc${PDB}
-../../../cvc-scripts/computeAllEnergy.sh ${PDB}.pdb 256
+cd ${RESDIR}/emmc
+${CVC}/computeAllEnergy.sh ${PDB}.pdb 256
 if [ $? = 0 ];then
-../../../cvc-scripts/getGB_single_parts_clean.sh ${PDB}.pdb >> gb${PDB}.txt
-../../../csvify_energy.py gb${PDB}.txt
-cat gb${PDB}.csv >> ../../../$RES
+${CVC}/getGB_single_parts_clean.sh ${PDB}.pdb >> gb${PDB}.txt
+${PWD}/csvify_energy.py gb${PDB}.txt
+cat gb${PDB}.csv >> $RES
 else
-	echo -n x,x,x,x,x,x, | cat >> ../../../$RES
+	echo -n x,x,x,x,x,x, | cat >> $RES
 fi	
 rm -r PQR OUT INP QUAD RAW RAWN
 
 ### Compute Amber Energy ###
 
 module reset
-../../../cvc-scripts/amber/runAmber_single.sh ${PDB}.pdb 50
+${CVC}/amber/runAmber_single.sh ${PDB}.pdb 50
 if [ $? = 0 ];then
-../../../getAmberEnergies.py ${PDB}.pdb
-cat amber.csv >> ../../../$RES
+${PWD}/getAmberEnergies.py ${PDB}.pdb
+cat amber.csv >> $RES
 else
-	echo -n x,x,x,x,x,x,x,x,x,x, | cat >> ../../../$RES
+	echo -n x,x,x,x,x,x,x,x,x,x, | cat >> $RES
 fi
 rm -r AMBER INP ERR leap.log mdinfo
-cd ../../../
+cd ${PWD}
 
 ### Calculate RSR, RSCC, Rwork, Rfree, DPI ###
 
-cp ./structures/${PDB}/emmc${PDB}/${PDB}.pdb ./
+cp ${RESDIR}/emmc/${PDB}.pdb ${PWD}
 PDB=${PDB} rsrCalc.sh
-mv ${PDB}.list ${PDB}_refmac1.pdb ./structures/${PDB}/emmc${PDB}
-csvify_rsr.py ./structures/${PDB}/emmc${PDB}/${PDB}.list
-csvify_rwork.py ./structures/${PDB}/emmc${PDB}/${PDB}_refmac1.pdb
-mv rsr.csv rwork.csv ./structures/${PDB}/emmc${PDB}
-cat ./structures/${PDB}/emmc${PDB}/rsr.csv >> $RES
+csvify_rsr.py ${PDB}.list
+csvify_rwork.py ${PDB}_refmac1.pdb ${PDB}_refmac1.log
+mv ${PDB}.list ${PDB}_refmac1.pdb ${PDB}_refmac1.log rsr.csv rwork.csv ${RESDIR}/emmc
+cat ${RESDIR}/emmc/rsr.csv >> $RES
 if [ $? != 0];then
 	echo -n x,x, | cat >> $RES
 fi
-cat ./structures/${PDB}/emmc${PDB}/rwork.csv >> $RES
+cat ${RESDIR}/emmc/rwork.csv >> $RES
 if [ $? != 0];then
-	echo -n x,x, | cat >> $RES
+	echo -n x,x,x,x, | cat >> $RES
 fi
 rm ${PDB}.pdb
 echo '' | cat >> $RES
@@ -229,8 +235,8 @@ echo '' | cat >> $RES
 
 ## Split each chain into one pdb file ###
 
-mkdir ./structures/${PDB}/3drefine/
-./single_chain.py ./structures/${PDB}/${PDB}.pdb ./structures/${PDB}/3drefine/
+mkdir ${RESDIR}/3drefine/
+${PWD}/single_chain.py ${RESDIR}/${PDB}.pdb ${RESDIR}/3drefine/
 
 # Refine each and recombine into one pdb file ###
 
@@ -238,74 +244,69 @@ module reset
 ml python/2.7.12
 ml intel
 ml boost/1.55.0
-for item in ./structures/${PDB}/3drefine/*.pdb; do
-	/work/04202/sdo395/i3Drefine/bin/i3Drefine.sh ${item} 1 &>> ./structures/${PDB}/3drefine/3drefine.out
+for item in ${RESDIR}/3drefine/*.pdb; do
+	${3D} ${item} 1 &>> ${RESDIR}/3drefine/3drefine.out
 	rm ${item}
 done
-3Drefine_parser.py ./structures/${PDB}/3drefine/ ./structures/${PDB}/3drefine/3drefine.out
-recombineChains.py ./structures/${PDB}/${PDB}.pdb ./structures/${PDB}/3drefine/*.pdb ${PDB}
-mv ${PDB}.pdb ./structures/${PDB}/3drefine
+${PWD}/3Drefine_parser.py ${RESDIR}/3drefine/ ${RESDIR}/3drefine/3drefine.out
+${PWD}/recombineChains.py ${RESDIR}/${PDB}.pdb ${RESDIR}/3drefine/*.pdb ${PDB}
+mv ${PDB}.pdb ${RESDIR}/3drefine
 
 #### MolProbity ###
 
 ml gcc
-/work/01872/nclement/software/MolProbity/cmdline/oneline-analysis ./structures/${PDB}/3drefine >> ./structures/${PDB}/3drefine/3DRefineMP.txt
+${MP} ${RESDIR}/3drefine >> ${RESDIR}/3drefine/3DRefineMP.txt
 if [ $? = 0 ];then
-readMP.py ./structures/${PDB}/3drefine/3DRefineMP.txt
-csvify_MP.py ./structures/${PDB}/3drefine/3DRefineMP.txt ${PDB}.pdb
-mv ${PDB}MP.csv ./structures/${PDB}/3drefine
+${PWD}/readMP.py ${RESDIR}/3drefine/3DRefineMP.txt
+${PWD}/csvify_MP.py ${RESDIR}/3drefine/3DRefineMP.txt ${PDB}.pdb
+mv ${PDB}MP.csv ${RESDIR}/3drefine
 echo -n 3DRefine, | cat >> $RES
-cat ./structures/${PDB}/3drefine/${PDB}MP.csv >> $RES
+cat ${RESDIR}/3drefine/${PDB}MP.csv >> $RES
 else
 	echo -n 3DRefine,${PDB},x,x,x,x, | cat >> $RES
 fi
 
 ### Compute Energy ###
 
-cd ./structures/${PDB}/3drefine/
+cd ${RESDIR}/3drefine/
 module reset
-#for file in *.pdb; do
-#	if [ ${file} != 3DRefineMP.txt ]; then
-		../../../cvc-scripts/computeAllEnergy.sh ${PDB}.pdb 256
-		if [ $? = 0 ]; then
-		../../../cvc-scripts/getGB_single_parts_clean.sh ${PDB}.pdb >> gb${PDB}.txt
-		../../../csvify_energy.py gb${PDB}.txt
-		cat gb${PDB}.csv >> ../../../$RES
-		else
-			echo -n x,x,x,x,x,x, | cat >> ../../../$RES
-		fi
-		rm -r PQR OUT INP QUAD RAW RAWN
-#	fi
-#done
+${CVC}/computeAllEnergy.sh ${PDB}.pdb 256
+if [ $? = 0 ]; then
+${CVC}/getGB_single_parts_clean.sh ${PDB}.pdb >> gb${PDB}.txt
+${PWD}/csvify_energy.py gb${PDB}.txt
+cat gb${PDB}.csv >> $RES
+else
+	echo -n x,x,x,x,x,x, | cat >> $RES
+fi
+rm -r PQR OUT INP QUAD RAW RAWN
 
 ### Compute Amber Energy ###
 
 module reset
-../../../cvc-scripts/amber/runAmber_single.sh ${PDB}.pdb 50
+${CVC}/amber/runAmber_single.sh ${PDB}.pdb 50
 if [ $? = 0 ];then
-../../../getAmberEnergies.py ${PDB}.pdb
-cat amber.csv >> ../../../$RES
+${PWD}/getAmberEnergies.py ${PDB}.pdb
+cat amber.csv >> $RES
 else
-	echo -n x,x,x,x,x,x,x,x,x,x, | cat >> ../../../$RES
+	echo -n x,x,x,x,x,x,x,x,x,x, | cat >> $RES
 fi
 rm -r AMBER INP ERR leap.log mdinfo
-cd ../../../
+cd ${PWD}
 
 ### Calculate RSR, RSCC, Rwork, Rfree, DPI ###
 
-cp ./structures/${PDB}/3drefine/${PDB}.pdb ./
+cp ${RESDIR}/3drefine/${PDB}.pdb ${PWD}
 PDB=${PDB} rsrCalc.sh
-mv ${PDB}.list ${PDB}_refmac1.pdb ./structures/${PDB}/3drefine
-csvify_rsr.py ./structures/${PDB}/3drefine/${PDB}.list
-csvify_rwork.py ./structures/${PDB}/3drefine/${PDB}_refmac1.pdb
-mv rsr.csv rwork.csv ./structures/${PDB}/3drefine
-cat ./structures/${PDB}/3drefine/rsr.csv >> $RES 
+csvify_rsr.py ${PDB}.list
+csvify_rwork.py ${PDB}_refmac1.pdb ${PDB}_refmac1.log
+mv ${PDB}.list ${PDB}_refmac1.pdb ${PDB}_refmac1.log rsr.csv rwork.csv ${RESDIR}/3drefine
+cat ${RESDIR}/3drefine/rsr.csv >> $RES 
 if [ $? != 0 ];then
 	echo -n x,x, | cat >> $RES
 fi
-cat ./structures/${PDB}/3drefine/rwork.csv >> $RES
+cat ${RESDIR}/3drefine/rwork.csv >> $RES
 if [ $? != 0 ];then
-	echo -n x,x, | cat >> $RES
+	echo -n x,x,x,x, | cat >> $RES
 fi
 rm ${PDB}.pdb
 echo '' | cat >> $RES
@@ -314,74 +315,67 @@ echo '' | cat >> $RES
 
 ## Download from PDB_REDO Database ###
 
-mkdir ./structures/${PDB}/PDB_REDO
-wget -O ./structures/${PDB}/PDB_REDO/${PDB}.pdb www.cmbi.ru.nl/pdb_redo/${PDB:1:2}/${PDB}/${PDB}_final.pdb
+mkdir ${RESDIR}/PDB_REDO
+wget -O ${RESDIR}/PDB_REDO/${PDB}.pdb www.cmbi.ru.nl/pdb_redo/${PDB:1:2}/${PDB}/${PDB}_final.pdb
 
-### If structure exists, Refine ###
+### MolProbity ###	
 
-if [ $? = 0 ]; then
-
-	### MolProbity ###	
-
-	ml gcc
-	/work/01872/nclement/software/MolProbity/cmdline/oneline-analysis ./structures/${PDB}/PDB_REDO >> ./structures/${PDB}/PDB_REDO/PDB_REDO_MP.txt
-	if [ $? = 0 ];then
-	readMP.py ./structures/${PDB}/PDB_REDO/PDB_REDO_MP.txt
-	csvify_MP.py ./structures/${PDB}/PDB_REDO/PDB_REDO_MP.txt ${PDB}.pdb
-	mv ${PDB}MP.csv ./structures/${PDB}/PDB_REDO/
-	echo -n PDB_REDO, | cat >> $RES
-	cat ./structures/${PDB}/PDB_REDO/${PDB}MP.csv >> $RES
-	else
-		echo -n PDB_REDO,${PDB},x,x,x,x, | cat >> $RES
-	fi
-
-	### Compute Energy ###
-
-	module reset
-	cd ./structures/${PDB}/PDB_REDO
-	../../../cvc-scripts/computeAllEnergy.sh ${PDB}.pdb 256
-	if [ $? = 0 ];then
-	../../../cvc-scripts/getGB_single_parts_clean.sh ${PDB}.pdb >> gb${PDB}.txt
-	../../../csvify_energy.py gb${PDB}.txt ${PDB}
-	cat gb${PDB}.csv >> ../../../$RES
-	else
-		echo -n x,x,x,x,x,x, | cat >> ../../../$RES
-	fi
-	rm -r PQR OUT INP QUAD RAW RAWN
-
-	### Compute Amber Energy ###
-
-	module reset
-	../../../cvc-scripts/amber/runAmber_single.sh ${PDB}.pdb 50
-	if [ $? = 0 ];then
-	../../../getAmberEnergies.py ${PDB}.pdb
-	cat amber.csv >> ../../../$RES
-	else
-		echo -n x,x,x,x,x,x,x,x,x,x, | cat >> ../../../$RES
-	fi
-	rm -r AMBER INP ERR leap.log mdinfo
-	cd ../../../
-
-	### Calculate RSR, RSCC, Rwork, Rfree, DPI ###
-	
-	cp ./structures/${PDB}/PDB_REDO/${PDB}.pdb ./
-	PDB=${PDB} rsrCalc.sh
-	mv ${PDB}.list ${PDB}_refmac1.pdb ./structures/${PDB}/PDB_REDO
-	csvify_rsr.py ./structures/${PDB}/PDB_REDO/${PDB}.list
-	csvify_rwork.py ./structures/${PDB}/PDB_REDO/${PDB}_refmac1.pdb
-	mv rsr.csv rwork.csv ./structures/${PDB}/PDB_REDO
-	cat ./structures/${PDB}/PDB_REDO/rsr.csv >> $RES
-	if [ $? != 0 ];then
-		echo -n x,x, | cat >> $RES
-	fi
-	cat ./structures/${PDB}/PDB_REDO/rwork.csv >> $RES
-	if [ $? != 0 ];then
-		echo -n x,x, | cat >> $RES
-	fi
-	rm ${PDB}.pdb
-	echo '' | cat >> $RES
-
+ml gcc
+${MP} ${RESDIR}/PDB_REDO >> ${RESDIR}/PDB_REDO/PDB_REDO_MP.txt
+if [ $? = 0 ];then
+${PWD}/readMP.py ${RESDIR}/PDB_REDO/PDB_REDO_MP.txt
+${PWD}/csvify_MP.py ${RESDIR}/PDB_REDO/PDB_REDO_MP.txt ${PDB}.pdb
+mv ${PDB}MP.csv ${RESDIR}/PDB_REDO/
+echo -n PDB_REDO, | cat >> $RES
+cat ${RESDIR}/PDB_REDO/${PDB}MP.csv >> $RES
+else
+	echo -n PDB_REDO,${PDB},x,x,x,x, | cat >> $RES
 fi
 
+### Compute Energy ###
+
+module reset
+cd ${RESDIR}/PDB_REDO
+${CVC}/computeAllEnergy.sh ${PDB}.pdb 256
+if [ $? = 0 ];then
+${CVC}/getGB_single_parts_clean.sh ${PDB}.pdb >> gb${PDB}.txt
+${PWD}/csvify_energy.py gb${PDB}.txt
+cat gb${PDB}.csv >> $RES
+else
+	echo -n x,x,x,x,x,x, | cat >> $RES
+fi
+rm -r PQR OUT INP QUAD RAW RAWN
+
+### Compute Amber Energy ###
+
+module reset
+${CVC}/amber/runAmber_single.sh ${PDB}.pdb 50
+if [ $? = 0 ];then
+${PWD}/getAmberEnergies.py ${PDB}.pdb
+cat amber.csv >> $RES
+else
+	echo -n x,x,x,x,x,x,x,x,x,x, | cat >> $RES
+fi
+rm -r AMBER INP ERR leap.log mdinfo
+cd ${PWD}
+
+### Calculate RSR, RSCC, Rwork, Rfree, DPI ###
+
+cp ${RESDIR}/PDB_REDO/${PDB}.pdb ${PWD}
+PDB=${PDB} rsrCalc.sh
+${PWD}/csvify_rsr.py ${PDB}.list
+${PWD}/csvify_rwork.py ${PDB}_refmac1.pdb ${PDB}_refmac1.log
+mv ${PDB}.list ${PDB}_refmac1.pdb ${PDB}_refmac1.log rsr.csv rwork.csv ${RESDIR}/PDB_REDO
+cat ${RESDIR}/PDB_REDO/rsr.csv >> $RES
+if [ $? != 0 ];then
+	echo -n x,x, | cat >> $RES
+fi
+cat ${RESDIR}/PDB_REDO/rwork.csv >> $RES
+if [ $? != 0 ];then
+	echo -n x,x,x,x, | cat >> $RES
+fi
+rm ${PDB}.pdb
+echo '' | cat >> $RES
+
 rm ${PDB}.cif
-mv $RES ./structures
+mv $RES ${STR}
