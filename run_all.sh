@@ -171,7 +171,7 @@ mv ${RESDIR}/mc${PDB}.pdb ${RESDIR}/mc/${PDB}.pdb
 
 ### Full Atom Refine ###
 
-${MOD}/emrefinement ${MOD}/mc ${MOD} ${PDB}.pdb ${PDB}.pdb 50 10
+${MOD}/emrefinement ${RESDIR}/mc ${MOD} ${PDB}.pdb ${PDB}.pdb 50 10
 mkdir ${RESDIR}/emmc
 mv ${RESDIR}/mc/em${PDB}.pdb ${RESDIR}/emmc/${PDB}.pdb
 edit_mf_results.py ${RESDIR}/emmc/${PDB}.pdb
