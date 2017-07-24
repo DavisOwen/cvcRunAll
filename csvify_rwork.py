@@ -17,10 +17,13 @@ for line in f:
 			g.write(string[-1]+',')
 
 f = open(sys.argv[2],'r')
+found = False
 for line in f:
 	string = line.split()
 	if len(string) > 0:
-		if string[0] == 'Cruickshanks':
+		if string[0] == 'Cruickshanks' and found == False:
 			g.write(string[-1]+',')
+			found = True
 		if string[0] == 'DPI':
 			g.write(string[-1]+',')
+			break
